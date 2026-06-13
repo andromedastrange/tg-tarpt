@@ -1,0 +1,65 @@
+import os
+import requests
+import json
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+
+# --- ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (их позже добавим на Railway) ---
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+
+# --- ФУНКЦИЯ ЗАПРОСА К OPENROUTER ---
+async def ask_openrouter(question: str) -> str:
+    """Отправляет вопрос в OpenRouter (бесплатная модель) и возвращает ответ"""
+    try:
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "google/gemini-2.0-flash-exp:free",  # бесплатная быстрая модель
+                "messages": [
+                    {"role": "system", "content": "Ты — мудрый оракул. Отвечай кратко, по делу и чуть загадочно."},
+                    {"role": "user", "content": question}
+                ],
+                "temperature": 0.8,
+                "max_tokens": 500,
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data['choices'][0]['message']['content']
+    except Exception as e:
+        print(f"Ошибка OpenRouter: {e}")
+        return "❌ Не могу ответить сейчас. Попробуй позже."
+
+# --- ОБРАБОТЧИКИ БОТА ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔮 Привет! Я ИИ-оракул. Задай любой вопрос о будущем, любви, работе — и я сделаю расклад.\n\n"
+        "Просто напиши свой вопрос текстом."
+    )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_question = update.message.text
+    if not user_question:
+        return
+    await update.message.reply_text("✨ Думаю над твоим вопросом...")
+    answer = await ask_openrouter(user_question)
+    await update.message.reply_text(f"🔮 {answer}")
+
+# --- ЗАПУСК ---
+if __name__ == "__main__":
+    if not TELEGRAM_TOKEN or not OPENROUTER_API_KEY:
+        print("❌ Ошибка: не заданы переменные окружения TELEGRAM_TOKEN или OPENROUTER_API_KEY")
+        exit(1)
+    
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    print("✅ Бот запущен...")
+    app.run_polling()
